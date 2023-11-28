@@ -37,38 +37,8 @@ env:
 
 
 jobs:
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # PREPARE
-  
-  prepare:
-    runs-on: ubuntu-latest
-    outputs:
-      SCAN_MATRIX: ${{ steps.START.outputs.SCAN_MATRIX }}
-    steps:
-      #~
-      - name: "PR PIPELINE START"
-        id: START
-        run: |
-          ${{ secrets.ENTANDO_OPT_PPL_INSTALL_CMD }}
-          ~/ppl-run \
-            .. status-report \
-            .. @checkout-branch --lcd "$LOCAL_CLONE_DIR" \
-            .. @setup-feature-flags "PR_PREFLIGHT_CHECKS" "BOM_CHECK" "BOM" \
-            .. @setup-features-list "SCAN_MATRIX" --prefix "MTX-MVN-,MTX-SCAN-" \
-          ;
-      - name: "PR preflight checks"
-        if: steps.START.outputs.PR_PREFLIGHT_CHECKS != 'false'
-        id: pr-preflight-checks
-        run: |
-          ~/ppl-run pr-preflight-checks --lcd "$LOCAL_CLONE_DIR"
 
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-  # FULL-BUILD
-  
   full-build:
-    needs: [ 'prepare' ]
     runs-on: ubuntu-latest
     env:
       ENTANDO_BOT_TOKEN: ${{ secrets.ENTANDO_BOT_TOKEN }}
@@ -78,50 +48,27 @@ jobs:
       ENTANDO_OPT_OKD_LOGIN_INSECURE: "${{ secrets.ENTANDO_OPT_OKD_LOGIN_INSECURE }}"
       ENTANDO_OPT_OKD_CLI_URL: "${{ secrets.ENTANDO_OPT_OKD_CLI_URL }}"
     steps:
-      #~ CHECKOUT
-      - name: "CHECKOUT"
-        id: CHECKOUT
-        run: |
-          ${{ secrets.ENTANDO_OPT_PPL_INSTALL_CMD }}
-          ~/ppl-run checkout-branch \
-            --lcd "$LOCAL_CLONE_DIR" \
-            --token "$ENTANDO_BOT_TOKEN" \
-          ;
-          ~/ppl-run generic GENERATE-BUILD-CACHE-KEY "BUILD_CACHE_KEY" --lcd "$LOCAL_CLONE_DIR" >> $GITHUB_ENV
-      #~ JDK
-      - name: "Set up JDK 11"
+
+      - name: Chechout
+        uses: actions/checkout@v3
+      - name: Set up JDK 11
         uses: actions/setup-java@v1
         with:
           java-version: 11
-      #~ MAVEN CACHE
-      - name: "Cache Maven packages"
-        uses: actions/cache@v2
-        with:
-          path: ~/.m2
-          key: ${{ runner.os }}-m2
-          restore-keys: ${{ runner.os }}-m2
-      #~ BUILD CACHE
-      - name: "Cache Build Dir"
-        id: build-cache
-        uses: actions/cache@v2
-        with:
-          path: "${{ env.LOCAL_CLONE_DIR }}/target/"
-          key: ${{ runner.os }}-build-${{ env.BUILD_CACHE_KEY }}
-      #~ SONAR CACHE
       - name: Cache SonarCloud packages
         uses: actions/cache@v1
         with:
           path: ~/.sonar/cache
           key: ${{ runner.os }}-sonar
           restore-keys: ${{ runner.os }}-sonar
-      #~ BUILD
-      - name: "FULL BUILD"
-        env:
-          ENTANDO_OPT_SONAR_PROJECT_KEY: "${{ secrets.ENTANDO_OPT_SONAR_PROJECT_KEY }}"
-          SONAR_TOKEN: "${{ secrets.SONAR_TOKEN }}"
-          GITHUB_TOKEN: "${{ secrets.GITHUB_TOKEN }}"
-        run: |
-          ~/ppl-run generic FULL-BUILD --lcd "$LOCAL_CLONE_DIR"
+      - name: Cache Maven packages
+        uses: actions/cache@v1
+        with:
+          path: ~/.m2
+          key: ${{ runner.os }}-m2-${{ hashFiles('**/pom.xml') }}
+          restore-keys: ${{ runner.os }}-m2
+      - name: Run tests
+        run: mvn clean test -Ppre-deployment-verification
 
       - name: Test Report
         uses: dorny/test-reporter@v1
